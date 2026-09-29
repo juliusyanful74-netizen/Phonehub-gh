@@ -1,0 +1,17 @@
+node_modules/
+.expo/
+.expo-shared/
+.env
+.env.*
+.DS_Store
+npm-debug.log*
+coverage/
+frontend/node_modules/
+backend/.venv/
+backend/__pycache__/
+backend/*.db
+backend/.pytest_cache/
+backend/.mypy_cache/
+backend/.coverage
+**/__pycache__/
+*.pyc
