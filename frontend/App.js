@@ -14,7 +14,7 @@ import {
   View,
 } from 'react-native';
 
-const API_URL = 'http://127.0.0.1:8000';
+const API_URL = Platform.OS === 'android' ? 'http://10.0.2.2:8000' : 'http://127.0.0.1:8000';
 
 const emptyForm = {
   title: '',
@@ -27,16 +27,78 @@ const emptyForm = {
   location: '',
 };
 
+const BRANDS = ['Apple', 'Samsung', 'Google', 'Xiaomi', 'OnePlus', 'Motorola', 'Nokia', 'Sony'];
+const CONDITIONS = ['Like New', 'Good', 'Fair', 'Used'];
+const LOCATIONS = ['Accra', 'Kumasi', 'Takoradi', 'Tema', 'Cape Coast', 'Sekondi', 'Osino', 'Obuasi'];
+
+const PRICE_FILTERS = [
+  { label: 'All', min: 0, max: Infinity },
+  { label: 'Under GHS 200', min: 0, max: 200 },
+  { label: 'GHS 200 - 500', min: 200, max: 500 },
+  { label: 'GHS 500 - 1000', min: 500, max: 1000 },
+  { label: 'Above GHS 1000', min: 1000, max: Infinity },
+];
+
 export default function App() {
   const [listings, setListings] = useState([]);
   const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
   const [form, setForm] = useState(emptyForm);
   const [showForm, setShowForm] = useState(false);
+  const [selectedListing, setSelectedListing] = useState(null);
 
-  const totalValue = useMemo(() => {
-    return listings.reduce((sum, item) => sum + Number(item.price || 0), 0);
-  }, [listings]);
+  // Filter state
+  const [selectedBrand, setSelectedBrand] = useState(null);
+  const [selectedCondition, setSelectedCondition] = useState(null);
+  const [selectedLocation, setSelectedLocation] = useState(null);
+  const [selectedPriceFilter, setSelectedPriceFilter] = useState(0);
+  const [searchText, setSearchText] = useState('');
+  const [showFilters, setShowFilters] = useState(false);
+
+  const filteredListings = useMemo(() => {
+    let result = listings;
+
+    // Text search
+    if (searchText.trim()) {
+      const query = searchText.trim().toLowerCase();
+      result = result.filter((item) =>
+        [item.title, item.brand, item.model, item.seller_name]
+          .join(' ')
+          .toLowerCase()
+          .includes(query)
+      );
+    }
+
+    // Brand filter
+    if (selectedBrand) {
+      result = result.filter((item) => item.brand === selectedBrand);
+    }
+
+    // Condition filter
+    if (selectedCondition) {
+      result = result.filter((item) => item.condition === selectedCondition);
+    }
+
+    // Location filter
+    if (selectedLocation) {
+      result = result.filter((item) => item.location === selectedLocation);
+    }
+
+    // Price filter
+    const priceRange = PRICE_FILTERS[selectedPriceFilter];
+    result = result.filter((item) => item.price >= priceRange.min && item.price <= priceRange.max);
+
+    return result;
+  }, [listings, searchText, selectedBrand, selectedCondition, selectedLocation, selectedPriceFilter]);
+
+  const activeFilterCount = useMemo(() => {
+    let count = 0;
+    if (selectedBrand) count++;
+    if (selectedCondition) count++;
+    if (selectedLocation) count++;
+    if (selectedPriceFilter !== 0) count++;
+    return count;
+  }, [selectedBrand, selectedCondition, selectedLocation, selectedPriceFilter]);
 
   const fetchListings = async () => {
     try {
@@ -103,8 +165,16 @@ export default function App() {
     }
   };
 
-  const renderItem = ({ item }) => (
-    <View style={styles.card}>
+  const clearFilters = () => {
+    setSelectedBrand(null);
+    setSelectedCondition(null);
+    setSelectedLocation(null);
+    setSelectedPriceFilter(0);
+    setSearchText('');
+  };
+
+  const renderListingCard = ({ item }) => (
+    <TouchableOpacity style={styles.card} onPress={() => setSelectedListing(item)}>
       <View style={styles.cardTopRow}>
         <Text style={styles.phoneTitle}>{item.title}</Text>
         <Text style={styles.price}>GHS {Number(item.price).toFixed(2)}</Text>
@@ -117,8 +187,40 @@ export default function App() {
         <Text style={styles.conditionBadge}>{item.condition}</Text>
         <Text style={styles.sellerText}>By {item.seller_name}</Text>
       </View>
-    </View>
+    </TouchableOpacity>
   );
+
+  if (selectedListing) {
+    return (
+      <SafeAreaView style={styles.container}>
+        <StatusBar barStyle="dark-content" />
+
+        <TouchableOpacity style={styles.backButton} onPress={() => setSelectedListing(null)}>
+          <Text style={styles.backButtonText}>← Back</Text>
+        </TouchableOpacity>
+
+        <View style={styles.detailCard}>
+          <Text style={styles.detailTitle}>{selectedListing.title}</Text>
+          <Text style={styles.detailPrice}>GHS {Number(selectedListing.price).toFixed(2)}</Text>
+          <Text style={styles.detailMeta}>{selectedListing.brand} • {selectedListing.model}</Text>
+          <Text style={styles.detailMeta}>Location: {selectedListing.location}</Text>
+          <Text style={styles.detailMeta}>Seller: {selectedListing.seller_name}</Text>
+          <Text style={styles.detailMeta}>Condition: {selectedListing.condition}</Text>
+
+          <View style={styles.detailDescriptionBox}>
+            <Text style={styles.detailDescriptionTitle}>Description</Text>
+            <Text style={styles.detailDescription}>
+              {selectedListing.description || 'No description provided by the seller.'}
+            </Text>
+          </View>
+
+          <TouchableOpacity style={styles.contactButton} onPress={() => Alert.alert('Message', 'Contact seller feature coming soon')}>
+            <Text style={styles.contactButtonText}>Message seller</Text>
+          </TouchableOpacity>
+        </View>
+      </SafeAreaView>
+    );
+  }
 
   return (
     <SafeAreaView style={styles.container}>
@@ -135,17 +237,136 @@ export default function App() {
         </TouchableOpacity>
       </View>
 
-      <View style={styles.summaryRow}>
-        <View style={styles.summaryCard}>
-          <Text style={styles.summaryLabel}>Listings</Text>
-          <Text style={styles.summaryValue}>{listings.length}</Text>
-        </View>
+      <TextInput
+        value={searchText}
+        onChangeText={setSearchText}
+        placeholder="Search phones, brands..."
+        style={styles.searchInput}
+      />
 
-        <View style={styles.summaryCard}>
-          <Text style={styles.summaryLabel}>Inventory</Text>
-          <Text style={styles.summaryValue}>GHS {totalValue.toFixed(2)}</Text>
-        </View>
+      <View style={styles.filterHeaderRow}>
+        <TouchableOpacity
+          style={styles.filterToggleButton}
+          onPress={() => setShowFilters((prev) => !prev)}
+        >
+          <Text style={styles.filterToggleText}>🔍 Filters</Text>
+          {activeFilterCount > 0 && (
+            <View style={styles.filterBadge}>
+              <Text style={styles.filterBadgeText}>{activeFilterCount}</Text>
+            </View>
+          )}
+        </TouchableOpacity>
+
+        {activeFilterCount > 0 && (
+          <TouchableOpacity onPress={clearFilters}>
+            <Text style={styles.clearFiltersText}>Clear all</Text>
+          </TouchableOpacity>
+        )}
       </View>
+
+      {showFilters && (
+        <View style={styles.filtersPanel}>
+          <View style={styles.filterSection}>
+            <Text style={styles.filterSectionTitle}>Brand</Text>
+            <View style={styles.filterOptionsRow}>
+              {BRANDS.map((brand) => (
+                <TouchableOpacity
+                  key={brand}
+                  style={[
+                    styles.filterOption,
+                    selectedBrand === brand && styles.filterOptionActive,
+                  ]}
+                  onPress={() => setSelectedBrand(selectedBrand === brand ? null : brand)}
+                >
+                  <Text
+                    style={[
+                      styles.filterOptionText,
+                      selectedBrand === brand && styles.filterOptionTextActive,
+                    ]}
+                  >
+                    {brand}
+                  </Text>
+                </TouchableOpacity>
+              ))}
+            </View>
+          </View>
+
+          <View style={styles.filterSection}>
+            <Text style={styles.filterSectionTitle}>Condition</Text>
+            <View style={styles.filterOptionsRow}>
+              {CONDITIONS.map((condition) => (
+                <TouchableOpacity
+                  key={condition}
+                  style={[
+                    styles.filterOption,
+                    selectedCondition === condition && styles.filterOptionActive,
+                  ]}
+                  onPress={() => setSelectedCondition(selectedCondition === condition ? null : condition)}
+                >
+                  <Text
+                    style={[
+                      styles.filterOptionText,
+                      selectedCondition === condition && styles.filterOptionTextActive,
+                    ]}
+                  >
+                    {condition}
+                  </Text>
+                </TouchableOpacity>
+              ))}
+            </View>
+          </View>
+
+          <View style={styles.filterSection}>
+            <Text style={styles.filterSectionTitle}>Location</Text>
+            <View style={styles.filterOptionsRow}>
+              {LOCATIONS.map((location) => (
+                <TouchableOpacity
+                  key={location}
+                  style={[
+                    styles.filterOption,
+                    selectedLocation === location && styles.filterOptionActive,
+                  ]}
+                  onPress={() => setSelectedLocation(selectedLocation === location ? null : location)}
+                >
+                  <Text
+                    style={[
+                      styles.filterOptionText,
+                      selectedLocation === location && styles.filterOptionTextActive,
+                    ]}
+                  >
+                    {location}
+                  </Text>
+                </TouchableOpacity>
+              ))}
+            </View>
+          </View>
+
+          <View style={styles.filterSection}>
+            <Text style={styles.filterSectionTitle}>Price Range</Text>
+            <View style={styles.filterOptionsCol}>
+              {PRICE_FILTERS.map((priceRange, index) => (
+                <TouchableOpacity
+                  key={priceRange.label}
+                  style={[
+                    styles.filterOptionWide,
+                    selectedPriceFilter === index && styles.filterOptionActive,
+                  ]}
+                  onPress={() => setSelectedPriceFilter(index)}
+                >
+                  <Text
+                    style={[
+                      styles.filterOptionText,
+                      selectedPriceFilter === index && styles.filterOptionTextActive,
+                    ]}
+                  >
+                    {priceRange.label}
+                  </Text>
+                </TouchableOpacity>
+              ))}
+            </View>
+          </View>
+        </View>
+      )}
 
       {showForm && (
         <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
@@ -160,12 +381,12 @@ export default function App() {
             />
 
             <View style={styles.inlineRow}>
-              <TextInput
-                value={form.brand}
-                onChangeText={(value) => handleInputChange('brand', value)}
-                placeholder="Brand"
-                style={[styles.input, styles.inlineInput]}
-              />
+              <View style={[styles.selectWrapper, styles.inlineInput]}>
+                <Text style={styles.selectLabel}>Brand</Text>
+                <TouchableOpacity style={styles.selectField}>
+                  <Text style={styles.selectText}>{form.brand || 'Select brand'}</Text>
+                </TouchableOpacity>
+              </View>
 
               <TextInput
                 value={form.model}
@@ -184,12 +405,12 @@ export default function App() {
                 style={[styles.input, styles.inlineInput]}
               />
 
-              <TextInput
-                value={form.condition}
-                onChangeText={(value) => handleInputChange('condition', value)}
-                placeholder="Condition"
-                style={[styles.input, styles.inlineInput]}
-              />
+              <View style={[styles.selectWrapper, styles.inlineInput]}>
+                <Text style={styles.selectLabel}>Condition</Text>
+                <TouchableOpacity style={styles.selectField}>
+                  <Text style={styles.selectText}>{form.condition || 'Select'}</Text>
+                </TouchableOpacity>
+              </View>
             </View>
 
             <TextInput
@@ -199,12 +420,12 @@ export default function App() {
               style={styles.input}
             />
 
-            <TextInput
-              value={form.location}
-              onChangeText={(value) => handleInputChange('location', value)}
-              placeholder="Location"
-              style={styles.input}
-            />
+            <View style={styles.selectWrapper}>
+              <Text style={styles.selectLabel}>Location</Text>
+              <TouchableOpacity style={styles.selectField}>
+                <Text style={styles.selectText}>{form.location || 'Select location'}</Text>
+              </TouchableOpacity>
+            </View>
 
             <TextInput
               value={form.description}
@@ -225,20 +446,29 @@ export default function App() {
         </KeyboardAvoidingView>
       )}
 
-      <Text style={styles.sectionTitle}>Featured phones</Text>
+      <View style={styles.headerRow}>
+        <Text style={styles.sectionTitle}>Featured phones</Text>
+        <Text style={styles.resultCount}>{filteredListings.length} results</Text>
+      </View>
 
       {loading ? (
         <View style={styles.loadingContainer}>
           <ActivityIndicator size="large" color="#1d4ed8" />
         </View>
-      ) : (
+      ) : filteredListings.length > 0 ? (
         <FlatList
-          data={listings}
+          data={filteredListings}
           keyExtractor={(item) => item.id.toString()}
-          renderItem={renderItem}
+          renderItem={renderListingCard}
           contentContainerStyle={styles.listContent}
           showsVerticalScrollIndicator={false}
         />
+      ) : (
+        <View style={styles.emptyStateContainer}>
+          <Text style={styles.emptyStateIcon}>📱</Text>
+          <Text style={styles.emptyStateTitle}>No phones found</Text>
+          <Text style={styles.emptyStateText}>Try adjusting your filters or search term</Text>
+        </View>
       )}
     </SafeAreaView>
   );
@@ -278,43 +508,116 @@ const styles = StyleSheet.create({
     color: '#fff',
     fontWeight: '700',
   },
-  summaryRow: {
+  searchInput: {
+    backgroundColor: '#fff',
+    borderColor: '#dfe7f3',
+    borderWidth: 1,
+    borderRadius: 12,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    marginBottom: 12,
+    color: '#0f172a',
+  },
+  filterHeaderRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',
-    marginBottom: 16,
+    alignItems: 'center',
+    marginBottom: 12,
   },
-  summaryCard: {
-    flex: 1,
+  filterToggleButton: {
+    flexDirection: 'row',
+    backgroundColor: '#fff',
+    borderColor: '#dfe7f3',
+    borderWidth: 1,
+    borderRadius: 12,
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    alignItems: 'center',
+    gap: 6,
+  },
+  filterToggleText: {
+    fontWeight: '700',
+    color: '#0f172a',
+  },
+  filterBadge: {
+    backgroundColor: '#1d4ed8',
+    borderRadius: 999,
+    width: 20,
+    height: 20,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  filterBadgeText: {
+    color: '#fff',
+    fontSize: 12,
+    fontWeight: '700',
+  },
+  clearFiltersText: {
+    color: '#ef4444',
+    fontWeight: '700',
+  },
+  filtersPanel: {
     backgroundColor: '#fff',
     borderRadius: 16,
     padding: 16,
-    marginHorizontal: 4,
-    shadowColor: '#000',
-    shadowOpacity: 0.04,
-    shadowRadius: 8,
-    shadowOffset: { width: 0, height: 2 },
-    elevation: 2,
+    marginBottom: 12,
+    borderWidth: 1,
+    borderColor: '#e5e7eb',
   },
-  summaryLabel: {
-    color: '#64748b',
-    fontSize: 12,
-    marginBottom: 10,
+  filterSection: {
+    marginBottom: 16,
   },
-  summaryValue: {
-    color: '#111827',
-    fontSize: 20,
+  filterSectionTitle: {
+    fontSize: 14,
     fontWeight: '700',
+    color: '#0f172a',
+    marginBottom: 10,
+    textTransform: 'uppercase',
+    letterSpacing: 0.5,
+  },
+  filterOptionsRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+  },
+  filterOptionsCol: {
+    gap: 8,
+  },
+  filterOption: {
+    backgroundColor: '#f8fafc',
+    borderColor: '#e5e7eb',
+    borderWidth: 1,
+    borderRadius: 10,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+  },
+  filterOptionActive: {
+    backgroundColor: '#1d4ed8',
+    borderColor: '#1d4ed8',
+  },
+  filterOptionText: {
+    color: '#475569',
+    fontSize: 12,
+    fontWeight: '600',
+  },
+  filterOptionTextActive: {
+    color: '#fff',
+  },
+  filterOptionWide: {
+    backgroundColor: '#f8fafc',
+    borderColor: '#e5e7eb',
+    borderWidth: 1,
+    borderRadius: 10,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
   },
   formCard: {
     backgroundColor: '#fff',
     borderRadius: 18,
     padding: 16,
     marginBottom: 14,
-    shadowColor: '#000',
-    shadowOpacity: 0.04,
-    shadowRadius: 8,
-    shadowOffset: { width: 0, height: 2 },
-    elevation: 2,
+    borderWidth: 1,
+    borderColor: '#e5e7eb',
   },
   formTitle: {
     fontSize: 20,
@@ -341,6 +644,28 @@ const styles = StyleSheet.create({
     flex: 1,
     marginHorizontal: 4,
   },
+  selectWrapper: {
+    flex: 1,
+    marginHorizontal: 4,
+  },
+  selectLabel: {
+    fontSize: 12,
+    color: '#64748b',
+    fontWeight: '600',
+    marginBottom: 4,
+  },
+  selectField: {
+    backgroundColor: '#f8fafc',
+    borderWidth: 1,
+    borderColor: '#dbe3ef',
+    borderRadius: 12,
+    paddingHorizontal: 12,
+    paddingVertical: 12,
+  },
+  selectText: {
+    fontSize: 15,
+    color: '#0f172a',
+  },
   textArea: {
     minHeight: 90,
     textAlignVertical: 'top',
@@ -357,12 +682,22 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     fontSize: 16,
   },
+  headerRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginTop: 8,
+    marginBottom: 10,
+  },
   sectionTitle: {
     fontSize: 20,
     fontWeight: '700',
     color: '#111827',
-    marginTop: 8,
-    marginBottom: 10,
+  },
+  resultCount: {
+    fontSize: 12,
+    color: '#64748b',
+    fontWeight: '600',
   },
   card: {
     backgroundColor: '#fff',
@@ -380,7 +715,7 @@ const styles = StyleSheet.create({
   },
   phoneTitle: {
     flex: 1,
-    fontSize: 20,
+    fontSize: 18,
     fontWeight: '700',
     color: '#0f172a',
   },
@@ -414,6 +749,71 @@ const styles = StyleSheet.create({
     color: '#475569',
     fontSize: 12,
   },
+  backButton: {
+    alignSelf: 'flex-start',
+    marginBottom: 18,
+    paddingVertical: 8,
+    paddingHorizontal: 10,
+    borderRadius: 12,
+    backgroundColor: '#e2e8f0',
+  },
+  backButtonText: {
+    color: '#0f172a',
+    fontWeight: '700',
+  },
+  detailCard: {
+    backgroundColor: '#fff',
+    borderRadius: 18,
+    padding: 20,
+    borderWidth: 1,
+    borderColor: '#e5e7eb',
+  },
+  detailTitle: {
+    fontSize: 28,
+    fontWeight: '800',
+    color: '#0f172a',
+    marginBottom: 4,
+  },
+  detailPrice: {
+    fontSize: 24,
+    color: '#16a34a',
+    fontWeight: '800',
+    marginBottom: 10,
+  },
+  detailMeta: {
+    color: '#475569',
+    fontSize: 15,
+    marginBottom: 6,
+  },
+  detailDescriptionBox: {
+    backgroundColor: '#f8fafc',
+    borderRadius: 14,
+    padding: 14,
+    marginTop: 18,
+  },
+  detailDescriptionTitle: {
+    fontSize: 16,
+    fontWeight: '700',
+    color: '#0f172a',
+    marginBottom: 8,
+  },
+  detailDescription: {
+    color: '#334155',
+    fontSize: 15,
+    lineHeight: 22,
+  },
+  contactButton: {
+    backgroundColor: '#1d4ed8',
+    borderRadius: 12,
+    alignItems: 'center',
+    paddingVertical: 14,
+    marginTop: 18,
+  },
+  contactButtonText: {
+    color: '#fff',
+    fontWeight: '700',
+    fontSize: 16,
+  },
   listContent: {
     paddingBottom: 24,
   },
@@ -421,5 +821,26 @@ const styles = StyleSheet.create({
     flex: 1,
     justifyContent: 'center',
     alignItems: 'center',
+  },
+  emptyStateContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingHorizontal: 32,
+  },
+  emptyStateIcon: {
+    fontSize: 64,
+    marginBottom: 16,
+  },
+  emptyStateTitle: {
+    fontSize: 20,
+    fontWeight: '700',
+    color: '#0f172a',
+    marginBottom: 8,
+  },
+  emptyStateText: {
+    fontSize: 14,
+    color: '#64748b',
+    textAlign: 'center',
   },
 });
