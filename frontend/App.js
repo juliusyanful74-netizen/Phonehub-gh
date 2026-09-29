@@ -27,6 +27,12 @@ const emptyForm = {
   location: '',
 };
 
+const emptyAuthForm = {
+  name: '',
+  email: '',
+  password: '',
+};
+
 const BRANDS = ['Apple', 'Samsung', 'Google', 'Xiaomi', 'OnePlus', 'Motorola', 'Nokia', 'Sony'];
 const CONDITIONS = ['Like New', 'Good', 'Fair', 'Used'];
 const LOCATIONS = ['Accra', 'Kumasi', 'Takoradi', 'Tema', 'Cape Coast', 'Sekondi', 'Osino', 'Obuasi'];
@@ -40,51 +46,48 @@ const PRICE_FILTERS = [
 ];
 
 export default function App() {
+  const [activeTab, setActiveTab] = useState('browse');
   const [listings, setListings] = useState([]);
   const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
   const [form, setForm] = useState(emptyForm);
   const [showForm, setShowForm] = useState(false);
   const [selectedListing, setSelectedListing] = useState(null);
-
-  // Filter state
   const [selectedBrand, setSelectedBrand] = useState(null);
   const [selectedCondition, setSelectedCondition] = useState(null);
   const [selectedLocation, setSelectedLocation] = useState(null);
   const [selectedPriceFilter, setSelectedPriceFilter] = useState(0);
   const [searchText, setSearchText] = useState('');
   const [showFilters, setShowFilters] = useState(false);
+  const [authMode, setAuthMode] = useState('login');
+  const [authForm, setAuthForm] = useState(emptyAuthForm);
+  const [currentUser, setCurrentUser] = useState(null);
 
   const filteredListings = useMemo(() => {
     let result = listings;
 
-    // Text search
     if (searchText.trim()) {
       const query = searchText.trim().toLowerCase();
       result = result.filter((item) =>
-        [item.title, item.brand, item.model, item.seller_name]
+        [item.title, item.brand, item.model, item.seller_name, item.location]
           .join(' ')
           .toLowerCase()
           .includes(query)
       );
     }
 
-    // Brand filter
     if (selectedBrand) {
       result = result.filter((item) => item.brand === selectedBrand);
     }
 
-    // Condition filter
     if (selectedCondition) {
       result = result.filter((item) => item.condition === selectedCondition);
     }
 
-    // Location filter
     if (selectedLocation) {
       result = result.filter((item) => item.location === selectedLocation);
     }
 
-    // Price filter
     const priceRange = PRICE_FILTERS[selectedPriceFilter];
     result = result.filter((item) => item.price >= priceRange.min && item.price <= priceRange.max);
 
@@ -100,13 +103,15 @@ export default function App() {
     return count;
   }, [selectedBrand, selectedCondition, selectedLocation, selectedPriceFilter]);
 
+  const totalValue = useMemo(() => {
+    return listings.reduce((sum, item) => sum + Number(item.price || 0), 0);
+  }, [listings]);
+
   const fetchListings = async () => {
     try {
       setLoading(true);
       const response = await fetch(`${API_URL}/phones`);
-      if (!response.ok) {
-        throw new Error('Unable to load listings');
-      }
+      if (!response.ok) throw new Error('Unable to load listings');
       const data = await response.json();
       setListings(data);
     } catch (error) {
@@ -122,6 +127,18 @@ export default function App() {
 
   const handleInputChange = (key, value) => {
     setForm((prev) => ({ ...prev, [key]: value }));
+  };
+
+  const handleAuthInputChange = (key, value) => {
+    setAuthForm((prev) => ({ ...prev, [key]: value }));
+  };
+
+  const clearFilters = () => {
+    setSelectedBrand(null);
+    setSelectedCondition(null);
+    setSelectedLocation(null);
+    setSelectedPriceFilter(0);
+    setSearchText('');
   };
 
   const handleSubmitListing = async () => {
@@ -165,12 +182,39 @@ export default function App() {
     }
   };
 
-  const clearFilters = () => {
-    setSelectedBrand(null);
-    setSelectedCondition(null);
-    setSelectedLocation(null);
-    setSelectedPriceFilter(0);
-    setSearchText('');
+  const handleAuthSubmit = async () => {
+    if (!authForm.email || !authForm.password || (authMode === 'register' && !authForm.name)) {
+      Alert.alert('Missing fields', 'Please fill in all required fields');
+      return;
+    }
+
+    try {
+      setSubmitting(true);
+      const endpoint = authMode === 'register' ? '/users/register' : '/users/login';
+      const payload = authMode === 'register'
+        ? { name: authForm.name, email: authForm.email, password: authForm.password }
+        : { email: authForm.email, password: authForm.password };
+
+      const response = await fetch(`${API_URL}${endpoint}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+
+      const data = await response.json();
+      if (!response.ok) {
+        throw new Error(data.detail || 'Authentication failed');
+      }
+
+      setCurrentUser({ ...data, email: data.email || authForm.email });
+      setAuthForm(emptyAuthForm);
+      setActiveTab('browse');
+      Alert.alert('Success', authMode === 'register' ? 'Your account is ready' : 'Welcome back');
+    } catch (error) {
+      Alert.alert('Authentication error', error.message || 'Unable to authenticate');
+    } finally {
+      setSubmitting(false);
+    }
   };
 
   const renderListingCard = ({ item }) => (
@@ -214,7 +258,16 @@ export default function App() {
             </Text>
           </View>
 
-          <TouchableOpacity style={styles.contactButton} onPress={() => Alert.alert('Message', 'Contact seller feature coming soon')}>
+          <TouchableOpacity
+            style={styles.contactButton}
+            onPress={() => {
+              if (!currentUser) {
+                Alert.alert('Sign in required', 'Please log in before contacting a seller.');
+                return;
+              }
+              Alert.alert('Message seller', `Hi ${selectedListing.seller_name}, I am interested in ${selectedListing.title}.`);
+            }}
+          >
             <Text style={styles.contactButtonText}>Message seller</Text>
           </TouchableOpacity>
         </View>
@@ -237,238 +290,288 @@ export default function App() {
         </TouchableOpacity>
       </View>
 
-      <TextInput
-        value={searchText}
-        onChangeText={setSearchText}
-        placeholder="Search phones, brands..."
-        style={styles.searchInput}
-      />
-
-      <View style={styles.filterHeaderRow}>
+      <View style={styles.tabRow}>
         <TouchableOpacity
-          style={styles.filterToggleButton}
-          onPress={() => setShowFilters((prev) => !prev)}
+          style={[styles.tabButton, activeTab === 'browse' && styles.tabButtonActive]}
+          onPress={() => setActiveTab('browse')}
         >
-          <Text style={styles.filterToggleText}>🔍 Filters</Text>
-          {activeFilterCount > 0 && (
-            <View style={styles.filterBadge}>
-              <Text style={styles.filterBadgeText}>{activeFilterCount}</Text>
-            </View>
-          )}
+          <Text style={[styles.tabButtonText, activeTab === 'browse' && styles.tabButtonTextActive]}>Browse</Text>
         </TouchableOpacity>
 
-        {activeFilterCount > 0 && (
-          <TouchableOpacity onPress={clearFilters}>
-            <Text style={styles.clearFiltersText}>Clear all</Text>
-          </TouchableOpacity>
-        )}
+        <TouchableOpacity
+          style={[styles.tabButton, activeTab === 'account' && styles.tabButtonActive]}
+          onPress={() => setActiveTab('account')}
+        >
+          <Text style={[styles.tabButtonText, activeTab === 'account' && styles.tabButtonTextActive]}>
+            {currentUser ? 'Account' : 'Login'}
+          </Text>
+        </TouchableOpacity>
       </View>
 
-      {showFilters && (
-        <View style={styles.filtersPanel}>
-          <View style={styles.filterSection}>
-            <Text style={styles.filterSectionTitle}>Brand</Text>
-            <View style={styles.filterOptionsRow}>
-              {BRANDS.map((brand) => (
-                <TouchableOpacity
-                  key={brand}
-                  style={[
-                    styles.filterOption,
-                    selectedBrand === brand && styles.filterOptionActive,
-                  ]}
-                  onPress={() => setSelectedBrand(selectedBrand === brand ? null : brand)}
-                >
-                  <Text
-                    style={[
-                      styles.filterOptionText,
-                      selectedBrand === brand && styles.filterOptionTextActive,
-                    ]}
-                  >
-                    {brand}
-                  </Text>
-                </TouchableOpacity>
-              ))}
-            </View>
-          </View>
+      {activeTab === 'account' ? (
+        currentUser ? (
+          <View style={styles.accountCard}>
+            <Text style={styles.accountGreeting}>Welcome back</Text>
+            <Text style={styles.accountName}>{currentUser.name}</Text>
+            <Text style={styles.accountEmail}>{currentUser.email}</Text>
 
-          <View style={styles.filterSection}>
-            <Text style={styles.filterSectionTitle}>Condition</Text>
-            <View style={styles.filterOptionsRow}>
-              {CONDITIONS.map((condition) => (
-                <TouchableOpacity
-                  key={condition}
-                  style={[
-                    styles.filterOption,
-                    selectedCondition === condition && styles.filterOptionActive,
-                  ]}
-                  onPress={() => setSelectedCondition(selectedCondition === condition ? null : condition)}
-                >
-                  <Text
-                    style={[
-                      styles.filterOptionText,
-                      selectedCondition === condition && styles.filterOptionTextActive,
-                    ]}
-                  >
-                    {condition}
-                  </Text>
-                </TouchableOpacity>
-              ))}
-            </View>
-          </View>
-
-          <View style={styles.filterSection}>
-            <Text style={styles.filterSectionTitle}>Location</Text>
-            <View style={styles.filterOptionsRow}>
-              {LOCATIONS.map((location) => (
-                <TouchableOpacity
-                  key={location}
-                  style={[
-                    styles.filterOption,
-                    selectedLocation === location && styles.filterOptionActive,
-                  ]}
-                  onPress={() => setSelectedLocation(selectedLocation === location ? null : location)}
-                >
-                  <Text
-                    style={[
-                      styles.filterOptionText,
-                      selectedLocation === location && styles.filterOptionTextActive,
-                    ]}
-                  >
-                    {location}
-                  </Text>
-                </TouchableOpacity>
-              ))}
-            </View>
-          </View>
-
-          <View style={styles.filterSection}>
-            <Text style={styles.filterSectionTitle}>Price Range</Text>
-            <View style={styles.filterOptionsCol}>
-              {PRICE_FILTERS.map((priceRange, index) => (
-                <TouchableOpacity
-                  key={priceRange.label}
-                  style={[
-                    styles.filterOptionWide,
-                    selectedPriceFilter === index && styles.filterOptionActive,
-                  ]}
-                  onPress={() => setSelectedPriceFilter(index)}
-                >
-                  <Text
-                    style={[
-                      styles.filterOptionText,
-                      selectedPriceFilter === index && styles.filterOptionTextActive,
-                    ]}
-                  >
-                    {priceRange.label}
-                  </Text>
-                </TouchableOpacity>
-              ))}
-            </View>
-          </View>
-        </View>
-      )}
-
-      {showForm && (
-        <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
-          <View style={styles.formCard}>
-            <Text style={styles.formTitle}>Post a phone</Text>
-
-            <TextInput
-              value={form.title}
-              onChangeText={(value) => handleInputChange('title', value)}
-              placeholder="Phone title"
-              style={styles.input}
-            />
-
-            <View style={styles.inlineRow}>
-              <View style={[styles.selectWrapper, styles.inlineInput]}>
-                <Text style={styles.selectLabel}>Brand</Text>
-                <TouchableOpacity style={styles.selectField}>
-                  <Text style={styles.selectText}>{form.brand || 'Select brand'}</Text>
-                </TouchableOpacity>
-              </View>
-
-              <TextInput
-                value={form.model}
-                onChangeText={(value) => handleInputChange('model', value)}
-                placeholder="Model"
-                style={[styles.input, styles.inlineInput]}
-              />
-            </View>
-
-            <View style={styles.inlineRow}>
-              <TextInput
-                value={form.price}
-                onChangeText={(value) => handleInputChange('price', value)}
-                placeholder="Price"
-                keyboardType="numeric"
-                style={[styles.input, styles.inlineInput]}
-              />
-
-              <View style={[styles.selectWrapper, styles.inlineInput]}>
-                <Text style={styles.selectLabel}>Condition</Text>
-                <TouchableOpacity style={styles.selectField}>
-                  <Text style={styles.selectText}>{form.condition || 'Select'}</Text>
-                </TouchableOpacity>
-              </View>
-            </View>
-
-            <TextInput
-              value={form.seller_name}
-              onChangeText={(value) => handleInputChange('seller_name', value)}
-              placeholder="Seller name"
-              style={styles.input}
-            />
-
-            <View style={styles.selectWrapper}>
-              <Text style={styles.selectLabel}>Location</Text>
-              <TouchableOpacity style={styles.selectField}>
-                <Text style={styles.selectText}>{form.location || 'Select location'}</Text>
-              </TouchableOpacity>
-            </View>
-
-            <TextInput
-              value={form.description}
-              onChangeText={(value) => handleInputChange('description', value)}
-              placeholder="Short description"
-              multiline
-              style={[styles.input, styles.textArea]}
-            />
-
-            <TouchableOpacity style={styles.submitButton} onPress={handleSubmitListing} disabled={submitting}>
-              {submitting ? (
-                <ActivityIndicator color="#fff" />
-              ) : (
-                <Text style={styles.submitButtonText}>Publish listing</Text>
-              )}
+            <TouchableOpacity
+              style={styles.logoutButton}
+              onPress={() => {
+                setCurrentUser(null);
+                setActiveTab('browse');
+              }}
+            >
+              <Text style={styles.logoutButtonText}>Log out</Text>
             </TouchableOpacity>
           </View>
-        </KeyboardAvoidingView>
-      )}
+        ) : (
+          <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
+            <View style={styles.formCard}>
+              <View style={styles.switchRow}>
+                <TouchableOpacity
+                  style={[styles.switchButton, authMode === 'login' && styles.switchButtonActive]}
+                  onPress={() => setAuthMode('login')}
+                >
+                  <Text style={[styles.switchButtonText, authMode === 'login' && styles.switchButtonTextActive]}>Login</Text>
+                </TouchableOpacity>
 
-      <View style={styles.headerRow}>
-        <Text style={styles.sectionTitle}>Featured phones</Text>
-        <Text style={styles.resultCount}>{filteredListings.length} results</Text>
-      </View>
+                <TouchableOpacity
+                  style={[styles.switchButton, authMode === 'register' && styles.switchButtonActive]}
+                  onPress={() => setAuthMode('register')}
+                >
+                  <Text style={[styles.switchButtonText, authMode === 'register' && styles.switchButtonTextActive]}>Register</Text>
+                </TouchableOpacity>
+              </View>
 
-      {loading ? (
-        <View style={styles.loadingContainer}>
-          <ActivityIndicator size="large" color="#1d4ed8" />
-        </View>
-      ) : filteredListings.length > 0 ? (
-        <FlatList
-          data={filteredListings}
-          keyExtractor={(item) => item.id.toString()}
-          renderItem={renderListingCard}
-          contentContainerStyle={styles.listContent}
-          showsVerticalScrollIndicator={false}
-        />
+              {authMode === 'register' && (
+                <TextInput
+                  value={authForm.name}
+                  onChangeText={(value) => handleAuthInputChange('name', value)}
+                  placeholder="Full name"
+                  style={styles.input}
+                />
+              )}
+
+              <TextInput
+                value={authForm.email}
+                onChangeText={(value) => handleAuthInputChange('email', value)}
+                placeholder="Email"
+                keyboardType="email-address"
+                style={styles.input}
+              />
+
+              <TextInput
+                value={authForm.password}
+                onChangeText={(value) => handleAuthInputChange('password', value)}
+                placeholder="Password"
+                secureTextEntry
+                style={styles.input}
+              />
+
+              <TouchableOpacity style={styles.submitButton} onPress={handleAuthSubmit} disabled={submitting}>
+                {submitting ? (
+                  <ActivityIndicator color="#fff" />
+                ) : (
+                  <Text style={styles.submitButtonText}>{authMode === 'register' ? 'Create account' : 'Log in'}</Text>
+                )}
+              </TouchableOpacity>
+            </View>
+          </KeyboardAvoidingView>
+        )
       ) : (
-        <View style={styles.emptyStateContainer}>
-          <Text style={styles.emptyStateIcon}>📱</Text>
-          <Text style={styles.emptyStateTitle}>No phones found</Text>
-          <Text style={styles.emptyStateText}>Try adjusting your filters or search term</Text>
-        </View>
+        <>
+          <TextInput
+            value={searchText}
+            onChangeText={setSearchText}
+            placeholder="Search phones, brands..."
+            style={styles.searchInput}
+          />
+
+          <View style={styles.filterHeaderRow}>
+            <TouchableOpacity style={styles.filterToggleButton} onPress={() => setShowFilters((prev) => !prev)}>
+              <Text style={styles.filterToggleText}>🔍 Filters</Text>
+              {activeFilterCount > 0 && (
+                <View style={styles.filterBadge}>
+                  <Text style={styles.filterBadgeText}>{activeFilterCount}</Text>
+                </View>
+              )}
+            </TouchableOpacity>
+
+            {activeFilterCount > 0 && (
+              <TouchableOpacity onPress={clearFilters}>
+                <Text style={styles.clearFiltersText}>Clear all</Text>
+              </TouchableOpacity>
+            )}
+          </View>
+
+          {showFilters && (
+            <View style={styles.filtersPanel}>
+              <View style={styles.filterSection}>
+                <Text style={styles.filterSectionTitle}>Brand</Text>
+                <View style={styles.filterOptionsRow}>
+                  {BRANDS.map((brand) => (
+                    <TouchableOpacity
+                      key={brand}
+                      style={[styles.filterOption, selectedBrand === brand && styles.filterOptionActive]}
+                      onPress={() => setSelectedBrand(selectedBrand === brand ? null : brand)}
+                    >
+                      <Text style={[styles.filterOptionText, selectedBrand === brand && styles.filterOptionTextActive]}>{brand}</Text>
+                    </TouchableOpacity>
+                  ))}
+                </View>
+              </View>
+
+              <View style={styles.filterSection}>
+                <Text style={styles.filterSectionTitle}>Condition</Text>
+                <View style={styles.filterOptionsRow}>
+                  {CONDITIONS.map((condition) => (
+                    <TouchableOpacity
+                      key={condition}
+                      style={[styles.filterOption, selectedCondition === condition && styles.filterOptionActive]}
+                      onPress={() => setSelectedCondition(selectedCondition === condition ? null : condition)}
+                    >
+                      <Text style={[styles.filterOptionText, selectedCondition === condition && styles.filterOptionTextActive]}>{condition}</Text>
+                    </TouchableOpacity>
+                  ))}
+                </View>
+              </View>
+
+              <View style={styles.filterSection}>
+                <Text style={styles.filterSectionTitle}>Location</Text>
+                <View style={styles.filterOptionsRow}>
+                  {LOCATIONS.map((location) => (
+                    <TouchableOpacity
+                      key={location}
+                      style={[styles.filterOption, selectedLocation === location && styles.filterOptionActive]}
+                      onPress={() => setSelectedLocation(selectedLocation === location ? null : location)}
+                    >
+                      <Text style={[styles.filterOptionText, selectedLocation === location && styles.filterOptionTextActive]}>{location}</Text>
+                    </TouchableOpacity>
+                  ))}
+                </View>
+              </View>
+
+              <View style={styles.filterSection}>
+                <Text style={styles.filterSectionTitle}>Price Range</Text>
+                <View style={styles.filterOptionsCol}>
+                  {PRICE_FILTERS.map((priceRange, index) => (
+                    <TouchableOpacity
+                      key={priceRange.label}
+                      style={[styles.filterOptionWide, selectedPriceFilter === index && styles.filterOptionActive]}
+                      onPress={() => setSelectedPriceFilter(index)}
+                    >
+                      <Text style={[styles.filterOptionText, selectedPriceFilter === index && styles.filterOptionTextActive]}>{priceRange.label}</Text>
+                    </TouchableOpacity>
+                  ))}
+                </View>
+              </View>
+            </View>
+          )}
+
+          {showForm && (
+            <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
+              <View style={styles.formCard}>
+                <Text style={styles.formTitle}>Post a phone</Text>
+
+                <TextInput
+                  value={form.title}
+                  onChangeText={(value) => handleInputChange('title', value)}
+                  placeholder="Phone title"
+                  style={styles.input}
+                />
+
+                <View style={styles.inlineRow}>
+                  <TextInput
+                    value={form.brand}
+                    onChangeText={(value) => handleInputChange('brand', value)}
+                    placeholder="Brand"
+                    style={[styles.input, styles.inlineInput]}
+                  />
+
+                  <TextInput
+                    value={form.model}
+                    onChangeText={(value) => handleInputChange('model', value)}
+                    placeholder="Model"
+                    style={[styles.input, styles.inlineInput]}
+                  />
+                </View>
+
+                <View style={styles.inlineRow}>
+                  <TextInput
+                    value={form.price}
+                    onChangeText={(value) => handleInputChange('price', value)}
+                    placeholder="Price"
+                    keyboardType="numeric"
+                    style={[styles.input, styles.inlineInput]}
+                  />
+
+                  <TextInput
+                    value={form.condition}
+                    onChangeText={(value) => handleInputChange('condition', value)}
+                    placeholder="Condition"
+                    style={[styles.input, styles.inlineInput]}
+                  />
+                </View>
+
+                <TextInput
+                  value={form.seller_name}
+                  onChangeText={(value) => handleInputChange('seller_name', value)}
+                  placeholder="Seller name"
+                  style={styles.input}
+                />
+
+                <TextInput
+                  value={form.location}
+                  onChangeText={(value) => handleInputChange('location', value)}
+                  placeholder="Location"
+                  style={styles.input}
+                />
+
+                <TextInput
+                  value={form.description}
+                  onChangeText={(value) => handleInputChange('description', value)}
+                  placeholder="Short description"
+                  multiline
+                  style={[styles.input, styles.textArea]}
+                />
+
+                <TouchableOpacity style={styles.submitButton} onPress={handleSubmitListing} disabled={submitting}>
+                  {submitting ? (
+                    <ActivityIndicator color="#fff" />
+                  ) : (
+                    <Text style={styles.submitButtonText}>Publish listing</Text>
+                  )}
+                </TouchableOpacity>
+              </View>
+            </KeyboardAvoidingView>
+          )}
+
+          <View style={styles.headerRow}>
+            <Text style={styles.sectionTitle}>Featured phones</Text>
+            <Text style={styles.resultCount}>{filteredListings.length} results</Text>
+          </View>
+
+          {loading ? (
+            <View style={styles.loadingContainer}>
+              <ActivityIndicator size="large" color="#1d4ed8" />
+            </View>
+          ) : filteredListings.length > 0 ? (
+            <FlatList
+              data={filteredListings}
+              keyExtractor={(item) => item.id.toString()}
+              renderItem={renderListingCard}
+              contentContainerStyle={styles.listContent}
+              showsVerticalScrollIndicator={false}
+            />
+          ) : (
+            <View style={styles.emptyStateContainer}>
+              <Text style={styles.emptyStateIcon}>📱</Text>
+              <Text style={styles.emptyStateTitle}>No phones found</Text>
+              <Text style={styles.emptyStateText}>Try adjusting your filters or search term</Text>
+            </View>
+          )}
+        </>
       )}
     </SafeAreaView>
   );
@@ -507,6 +610,29 @@ const styles = StyleSheet.create({
   sellButtonText: {
     color: '#fff',
     fontWeight: '700',
+  },
+  tabRow: {
+    flexDirection: 'row',
+    marginBottom: 16,
+    backgroundColor: '#e2e8f0',
+    borderRadius: 12,
+    padding: 4,
+  },
+  tabButton: {
+    flex: 1,
+    paddingVertical: 10,
+    borderRadius: 10,
+    alignItems: 'center',
+  },
+  tabButtonActive: {
+    backgroundColor: '#fff',
+  },
+  tabButtonText: {
+    fontWeight: '700',
+    color: '#475569',
+  },
+  tabButtonTextActive: {
+    color: '#0f172a',
   },
   searchInput: {
     backgroundColor: '#fff',
@@ -619,11 +745,69 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: '#e5e7eb',
   },
+  switchRow: {
+    flexDirection: 'row',
+    backgroundColor: '#e2e8f0',
+    borderRadius: 12,
+    padding: 4,
+    marginBottom: 14,
+  },
+  switchButton: {
+    flex: 1,
+    paddingVertical: 10,
+    borderRadius: 10,
+    alignItems: 'center',
+  },
+  switchButtonActive: {
+    backgroundColor: '#fff',
+  },
+  switchButtonText: {
+    fontWeight: '700',
+    color: '#475569',
+  },
+  switchButtonTextActive: {
+    color: '#0f172a',
+  },
   formTitle: {
     fontSize: 20,
     fontWeight: '700',
     marginBottom: 12,
     color: '#0f172a',
+  },
+  accountCard: {
+    backgroundColor: '#fff',
+    borderRadius: 18,
+    padding: 20,
+    borderWidth: 1,
+    borderColor: '#e5e7eb',
+  },
+  accountGreeting: {
+    color: '#64748b',
+    fontSize: 13,
+    marginBottom: 6,
+    textTransform: 'uppercase',
+    letterSpacing: 1,
+  },
+  accountName: {
+    color: '#0f172a',
+    fontSize: 32,
+    fontWeight: '800',
+  },
+  accountEmail: {
+    color: '#475569',
+    fontSize: 16,
+    marginTop: 8,
+  },
+  logoutButton: {
+    backgroundColor: '#ef4444',
+    borderRadius: 12,
+    paddingVertical: 12,
+    alignItems: 'center',
+    marginTop: 18,
+  },
+  logoutButtonText: {
+    color: '#fff',
+    fontWeight: '700',
   },
   input: {
     backgroundColor: '#f8fafc',
@@ -643,28 +827,6 @@ const styles = StyleSheet.create({
   inlineInput: {
     flex: 1,
     marginHorizontal: 4,
-  },
-  selectWrapper: {
-    flex: 1,
-    marginHorizontal: 4,
-  },
-  selectLabel: {
-    fontSize: 12,
-    color: '#64748b',
-    fontWeight: '600',
-    marginBottom: 4,
-  },
-  selectField: {
-    backgroundColor: '#f8fafc',
-    borderWidth: 1,
-    borderColor: '#dbe3ef',
-    borderRadius: 12,
-    paddingHorizontal: 12,
-    paddingVertical: 12,
-  },
-  selectText: {
-    fontSize: 15,
-    color: '#0f172a',
   },
   textArea: {
     minHeight: 90,
